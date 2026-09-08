@@ -1,0 +1,1210 @@
+{
+  "updatedAt": "2026-09-08T10:30:07.474Z",
+  "createdAt": "2026-09-08T10:10:20.834Z",
+  "id": "PNLJEOsaRHaxFLXo",
+  "name": "Property Sourcing & Automated Outreach Engine",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "id": "83c65b98-aa83-4d86-9f11-4e58792e54d0",
+      "name": "Every Hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "bc3826a2-2a86-408d-965e-1e5ba8447366",
+      "name": "Read Raw Listings",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        112
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SeWcw5EURnTKVTDR",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ---- CONFIGURE YOUR SOURCING FILTERS HERE ----\nconst TARGET_STATES = [];   // e.g. ['TX','FL'] — empty means allow all\nconst TARGET_CITIES = [];   // e.g. [\"Austin\"] — empty means allow all\nconst MIN_PRICE = 0;        // minimum purchase price\nconst MAX_PRICE = 750000;   // maximum purchase price\nconst MIN_SCORE = 40;       // drop leads scoring below this\n// -----------------------------------------------\n\nconst num = (v) => {\n  if (v === null || v === undefined) return 0;\n  const n = parseFloat(String(v).replace(/[^0-9.\\-]/g, ''));\n  return isNaN(n) ? 0 : n;\n};\n\nconst DISTRESS = ['distress','foreclos','short sale','as-is','as is','fixer','rehab','tlc','motivated','estate','probate','vacant','handyman'];\n\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const price = num(r.price);\n  const arv = num(r.arv);\n  const state = String(r.state || '').trim().toUpperCase();\n  const city = String(r.city || '').trim().toLowerCase();\n\n  // Geographic filter\n  if (TARGET_STATES.length && !TARGET_STATES.map(s => s.toUpperCase()).includes(state)) continue;\n  if (TARGET_CITIES.length && !TARGET_CITIES.map(c => c.toLowerCase()).includes(city)) continue;\n  // Price filter\n  if (price < MIN_PRICE || (MAX_PRICE > 0 && price > MAX_PRICE)) continue;\n\n  // ---- Scoring matrix ----\n  let score = 0;\n  const reasons = [];\n  // Discount / equity spread (up to 60 pts)\n  if (arv > 0 && price > 0) {\n    const discount = (arv - price) / arv; // fraction below ARV\n    const discPts = Math.max(0, Math.min(60, Math.round(discount * 150)));\n    score += discPts;\n    if (discPts > 0) reasons.push('equity spread ' + Math.round(discount * 100) + '%');\n  }\n  // Distress signals in status text (up to 30 pts)\n  const statusText = String(r.status || '').toLowerCase();\n  const hits = DISTRESS.filter(k => statusText.includes(k));\n  if (hits.length) {\n    score += Math.min(30, hits.length * 15);\n    reasons.push('distress signal: ' + hits.join(', '));\n  }\n  // Size bonus (up to 10 pts)\n  const sqft = num(r.sqft);\n  if (sqft >= 1200) { score += 10; }\n  else if (sqft >= 800) { score += 5; }\n\n  score = Math.max(0, Math.min(100, score));\n  const grade = score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D';\n  const est_profit = arv > 0 && price > 0 ? Math.round((arv - price) * 0.7) : 0;\n\n  if (score < MIN_SCORE) continue;\n\n  out.push({ json: Object.assign({}, r, {\n    price_num: price,\n    arv_num: arv,\n    profit_score: score,\n    grade,\n    est_profit,\n    score_reasons: reasons.join('; ') || 'baseline',\n  }) });\n}\nreturn out;"
+      },
+      "id": "2e47dd76-fe98-410f-8390-8b93ff83a031",
+      "name": "Filter & Score Listings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "<__PLACEHOLDER_VALUE__Skip-tracing API endpoint URL (e.g. BatchData property/skip-trace)__>",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpTemplatedCustomAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"address\": $json.address, \"city\": $json.city, \"state\": $json.state, \"zip\": $json.zip } }}",
+        "options": {}
+      },
+      "id": "e25ecfed-d208-4bc3-a234-73e28ba11ace",
+      "name": "Skip-Trace / Enrich Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        688,
+        32
+      ],
+      "credentials": {
+        "httpTemplatedCustomAuth": {
+          "id": "wF9zGfJqGxXcsuhq",
+          "name": "Simplified Custom Auth account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a professional real estate investor writing a short, warm, personalized cold outreach email to a property owner.\nWrite ONLY the email body (no subject line, no placeholders like [Name], no markdown).\nReference the specific property and be respectful and non-pushy. 90-130 words. End with a soft call to action to discuss a potential cash offer.\n\nOwner name: {{ $json.owner_name }}\nProperty address: {{ $(\"Filter & Score Listings\").item.json.address }}, {{ $(\"Filter & Score Listings\").item.json.city }}, {{ $(\"Filter & Score Listings\").item.json.state }}\nProperty status/notes: {{ $(\"Filter & Score Listings\").item.json.status }}\nBeds/Baths: {{ $(\"Filter & Score Listings\").item.json.beds }}/{{ $(\"Filter & Score Listings\").item.json.baths }}\nInvestor grade: {{ $(\"Filter & Score Listings\").item.json.grade }}",
+        "batching": {}
+      },
+      "id": "14f18a61-b59d-4233-accf-130a814c994a",
+      "name": "Generate Outreach Email",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        960,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini",
+          "cachedResultName": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "id": "6c44116e-98e2-446c-a701-0aeb05ee457c",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        1120,
+        368
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": null,
+          "name": "Gateway credits",
+          "__aiGatewayManaged": true
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const src = $('Filter & Score Listings').item.json;\nconst enr = $('Skip-Trace / Enrich Owner').item.json || {};\n// Basic LLM Chain outputs the generated text under $json.text\nconst emailBody = ($json.text || '').trim();\n\nreturn {\n  json: {\n    address: src.address,\n    city: src.city || '',\n    state: src.state || '',\n    zip: src.zip || '',\n    price: src.price_num,\n    arv: src.arv_num,\n    profit_score: src.profit_score,\n    grade: src.grade,\n    est_profit: src.est_profit,\n    score_reasons: src.score_reasons,\n    owner_name: enr.owner_name || '',\n    owner_phone: enr.owner_phone || '',\n    owner_email: enr.owner_email || '',\n    mailing_address: enr.mailing_address || '',\n    email_subject: \"Quick question about \" + src.address + (src.city ? \" in \" + src.city : \"\"),\n    email_body: emailBody,\n    sourced_at: new Date().toISOString(),\n    outreach_status: (enr.owner_email ? 'email_sent' : 'needs_review'),\n  }\n};"
+      },
+      "id": "415ad46a-eb7e-474e-b2d6-8a84071a5a2f",
+      "name": "Assemble Lead Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "address"
+          ],
+          "schema": [
+            {
+              "id": "address",
+              "displayName": "address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "city",
+              "displayName": "city",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "state",
+              "displayName": "state",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "zip",
+              "displayName": "zip",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "price",
+              "displayName": "price",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "arv",
+              "displayName": "arv",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "profit_score",
+              "displayName": "profit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "grade",
+              "displayName": "grade",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "est_profit",
+              "displayName": "est_profit",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "score_reasons",
+              "displayName": "score_reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "owner_name",
+              "displayName": "owner_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "owner_phone",
+              "displayName": "owner_phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "owner_email",
+              "displayName": "owner_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "mailing_address",
+              "displayName": "mailing_address",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "email_subject",
+              "displayName": "email_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "email_body",
+              "displayName": "email_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "outreach_status",
+              "displayName": "outreach_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            },
+            {
+              "id": "sourced_at",
+              "displayName": "sourced_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d0676860-3bca-42c9-8b37-80072551dcd3",
+      "name": "Stage Lead in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1472,
+        16
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "SeWcw5EURnTKVTDR",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "has-email",
+              "leftValue": "={{ $json.owner_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c87065ce-8af8-4124-82fd-b2817acfae0b",
+      "name": "Has Owner Email?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.owner_email }}",
+        "subject": "={{ $json.email_subject }}",
+        "emailType": "text",
+        "message": "={{ $json.email_body }}",
+        "options": {}
+      },
+      "id": "61ff5a1a-06a6-4f8b-a0e2-eeb676cda393",
+      "name": "Send Outreach Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1696,
+        208
+      ],
+      "webhookId": "80fd1b84-4374-4872-9a02-95285144d991",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4FoHWsDDl4W53rp9",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Hour": {
+      "main": [
+        [
+          {
+            "node": "Read Raw Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Raw Listings": {
+      "main": [
+        [
+          {
+            "node": "Filter & Score Listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter & Score Listings": {
+      "main": [
+        [
+          {
+            "node": "Skip-Trace / Enrich Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip-Trace / Enrich Owner": {
+      "main": [
+        [
+          {
+            "node": "Generate Outreach Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Outreach Email": {
+      "main": [
+        [
+          {
+            "node": "Assemble Lead Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Outreach Email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Lead Record": {
+      "main": [
+        [
+          {
+            "node": "Stage Lead in Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Owner Email?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Owner Email?": {
+      "main": [
+        [
+          {
+            "node": "Send Outreach Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "staticData": {
+    "node:Every Hour": {
+      "recurrenceRules": [
+        null
+      ],
+      "recurrenceRuleSignatures": [
+        null
+      ]
+    }
+  },
+  "meta": null,
+  "nodeGroups": [
+    {
+      "id": "0692cc9f-5d94-4f63-8750-ad8a4b3ec921",
+      "name": "Ingest Listings",
+      "nodeIds": [
+        "bc3826a2-2a86-408d-965e-1e5ba8447366"
+      ],
+      "description": "."
+    },
+    {
+      "id": "c3d3c4aa-de1b-4424-95c9-eb094897b648",
+      "name": "Score & Enrich",
+      "nodeIds": [
+        "2e47dd76-fe98-410f-8390-8b93ff83a031",
+        "e25ecfed-d208-4bc3-a234-73e28ba11ace"
+      ],
+      "description": "."
+    },
+    {
+      "id": "d63face1-5b61-44e5-bd1f-23dd3ab3e95d",
+      "name": "Generate & Deliver Outreach",
+      "nodeIds": [
+        "6c44116e-98e2-446c-a701-0aeb05ee457c",
+        "14f18a61-b59d-4233-accf-130a814c994a",
+        "415ad46a-eb7e-474e-b2d6-8a84071a5a2f",
+        "d0676860-3bca-42c9-8b37-80072551dcd3",
+        "c87065ce-8af8-4124-82fd-b2817acfae0b",
+        "61ff5a1a-06a6-4f8b-a0e2-eeb676cda393"
+      ],
+      "description": "."
+    }
+  ],
+  "pinData": {},
+  "versionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+  "activeVersionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+  "versionCounter": 11,
+  "triggerCount": 1,
+  "sourceWorkflowId": null,
+  "tags": [],
+  "parentFolder": null,
+  "activeVersion": {
+    "updatedAt": "2026-09-08T10:40:56.000Z",
+    "createdAt": "2026-09-08T10:30:07.475Z",
+    "versionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+    "workflowId": "PNLJEOsaRHaxFLXo",
+    "nodes": [
+      {
+        "parameters": {
+          "rule": {
+            "interval": [
+              {
+                "field": "hours"
+              }
+            ]
+          }
+        },
+        "id": "83c65b98-aa83-4d86-9f11-4e58792e54d0",
+        "name": "Every Hour",
+        "type": "n8n-nodes-base.scheduleTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          0,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o",
+            "mode": "list",
+            "cachedResultName": "Leads",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "gid=0",
+            "mode": "list",
+            "cachedResultName": "Sheet1",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit#gid=0"
+          },
+          "options": {}
+        },
+        "id": "bc3826a2-2a86-408d-965e-1e5ba8447366",
+        "name": "Read Raw Listings",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          224,
+          112
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "SeWcw5EURnTKVTDR",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "// ---- CONFIGURE YOUR SOURCING FILTERS HERE ----\nconst TARGET_STATES = [];   // e.g. ['TX','FL'] — empty means allow all\nconst TARGET_CITIES = [];   // e.g. [\"Austin\"] — empty means allow all\nconst MIN_PRICE = 0;        // minimum purchase price\nconst MAX_PRICE = 750000;   // maximum purchase price\nconst MIN_SCORE = 40;       // drop leads scoring below this\n// -----------------------------------------------\n\nconst num = (v) => {\n  if (v === null || v === undefined) return 0;\n  const n = parseFloat(String(v).replace(/[^0-9.\\-]/g, ''));\n  return isNaN(n) ? 0 : n;\n};\n\nconst DISTRESS = ['distress','foreclos','short sale','as-is','as is','fixer','rehab','tlc','motivated','estate','probate','vacant','handyman'];\n\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const price = num(r.price);\n  const arv = num(r.arv);\n  const state = String(r.state || '').trim().toUpperCase();\n  const city = String(r.city || '').trim().toLowerCase();\n\n  // Geographic filter\n  if (TARGET_STATES.length && !TARGET_STATES.map(s => s.toUpperCase()).includes(state)) continue;\n  if (TARGET_CITIES.length && !TARGET_CITIES.map(c => c.toLowerCase()).includes(city)) continue;\n  // Price filter\n  if (price < MIN_PRICE || (MAX_PRICE > 0 && price > MAX_PRICE)) continue;\n\n  // ---- Scoring matrix ----\n  let score = 0;\n  const reasons = [];\n  // Discount / equity spread (up to 60 pts)\n  if (arv > 0 && price > 0) {\n    const discount = (arv - price) / arv; // fraction below ARV\n    const discPts = Math.max(0, Math.min(60, Math.round(discount * 150)));\n    score += discPts;\n    if (discPts > 0) reasons.push('equity spread ' + Math.round(discount * 100) + '%');\n  }\n  // Distress signals in status text (up to 30 pts)\n  const statusText = String(r.status || '').toLowerCase();\n  const hits = DISTRESS.filter(k => statusText.includes(k));\n  if (hits.length) {\n    score += Math.min(30, hits.length * 15);\n    reasons.push('distress signal: ' + hits.join(', '));\n  }\n  // Size bonus (up to 10 pts)\n  const sqft = num(r.sqft);\n  if (sqft >= 1200) { score += 10; }\n  else if (sqft >= 800) { score += 5; }\n\n  score = Math.max(0, Math.min(100, score));\n  const grade = score >= 75 ? 'A' : score >= 60 ? 'B' : score >= 40 ? 'C' : 'D';\n  const est_profit = arv > 0 && price > 0 ? Math.round((arv - price) * 0.7) : 0;\n\n  if (score < MIN_SCORE) continue;\n\n  out.push({ json: Object.assign({}, r, {\n    price_num: price,\n    arv_num: arv,\n    profit_score: score,\n    grade,\n    est_profit,\n    score_reasons: reasons.join('; ') || 'baseline',\n  }) });\n}\nreturn out;"
+        },
+        "id": "2e47dd76-fe98-410f-8390-8b93ff83a031",
+        "name": "Filter & Score Listings",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          480,
+          -16
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "<__PLACEHOLDER_VALUE__Skip-tracing API endpoint URL (e.g. BatchData property/skip-trace)__>",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpTemplatedCustomAuth",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { \"address\": $json.address, \"city\": $json.city, \"state\": $json.state, \"zip\": $json.zip } }}",
+          "options": {}
+        },
+        "id": "e25ecfed-d208-4bc3-a234-73e28ba11ace",
+        "name": "Skip-Trace / Enrich Owner",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          688,
+          32
+        ],
+        "credentials": {
+          "httpTemplatedCustomAuth": {
+            "id": "wF9zGfJqGxXcsuhq",
+            "name": "Simplified Custom Auth account"
+          }
+        },
+        "onError": "continueRegularOutput"
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "=You are a professional real estate investor writing a short, warm, personalized cold outreach email to a property owner.\nWrite ONLY the email body (no subject line, no placeholders like [Name], no markdown).\nReference the specific property and be respectful and non-pushy. 90-130 words. End with a soft call to action to discuss a potential cash offer.\n\nOwner name: {{ $json.owner_name }}\nProperty address: {{ $(\"Filter & Score Listings\").item.json.address }}, {{ $(\"Filter & Score Listings\").item.json.city }}, {{ $(\"Filter & Score Listings\").item.json.state }}\nProperty status/notes: {{ $(\"Filter & Score Listings\").item.json.status }}\nBeds/Baths: {{ $(\"Filter & Score Listings\").item.json.beds }}/{{ $(\"Filter & Score Listings\").item.json.baths }}\nInvestor grade: {{ $(\"Filter & Score Listings\").item.json.grade }}",
+          "batching": {}
+        },
+        "id": "14f18a61-b59d-4233-accf-130a814c994a",
+        "name": "Generate Outreach Email",
+        "type": "@n8n/n8n-nodes-langchain.chainLlm",
+        "typeVersion": 1.9,
+        "position": [
+          960,
+          32
+        ]
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "mode": "list",
+            "value": "gpt-5-mini",
+            "cachedResultName": "gpt-5-mini"
+          },
+          "builtInTools": {},
+          "options": {}
+        },
+        "id": "6c44116e-98e2-446c-a701-0aeb05ee457c",
+        "name": "OpenAI Chat Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "typeVersion": 1.3,
+        "position": [
+          1120,
+          368
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": null,
+            "name": "Gateway credits",
+            "__aiGatewayManaged": true
+          }
+        }
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const src = $('Filter & Score Listings').item.json;\nconst enr = $('Skip-Trace / Enrich Owner').item.json || {};\n// Basic LLM Chain outputs the generated text under $json.text\nconst emailBody = ($json.text || '').trim();\n\nreturn {\n  json: {\n    address: src.address,\n    city: src.city || '',\n    state: src.state || '',\n    zip: src.zip || '',\n    price: src.price_num,\n    arv: src.arv_num,\n    profit_score: src.profit_score,\n    grade: src.grade,\n    est_profit: src.est_profit,\n    score_reasons: src.score_reasons,\n    owner_name: enr.owner_name || '',\n    owner_phone: enr.owner_phone || '',\n    owner_email: enr.owner_email || '',\n    mailing_address: enr.mailing_address || '',\n    email_subject: \"Quick question about \" + src.address + (src.city ? \" in \" + src.city : \"\"),\n    email_body: emailBody,\n    sourced_at: new Date().toISOString(),\n    outreach_status: (enr.owner_email ? 'email_sent' : 'needs_review'),\n  }\n};"
+        },
+        "id": "415ad46a-eb7e-474e-b2d6-8a84071a5a2f",
+        "name": "Assemble Lead Record",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1248,
+          112
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "appendOrUpdate",
+          "documentId": {
+            "__rl": true,
+            "value": "18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o",
+            "mode": "list",
+            "cachedResultName": "Leads",
+            "cachedResultUrl": "https://docs.google.com/spreadsheets/d/18uNAfDeGZ9mCp8JfxqnK2MFvTBtmkQSxCDnPjwuF49o/edit?usp=drivesdk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "Leads"
+          },
+          "columns": {
+            "mappingMode": "autoMapInputData",
+            "value": {},
+            "matchingColumns": [
+              "address"
+            ],
+            "schema": [
+              {
+                "id": "address",
+                "displayName": "address",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "city",
+                "displayName": "city",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "state",
+                "displayName": "state",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "zip",
+                "displayName": "zip",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "price",
+                "displayName": "price",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "arv",
+                "displayName": "arv",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "profit_score",
+                "displayName": "profit_score",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "grade",
+                "displayName": "grade",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "est_profit",
+                "displayName": "est_profit",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "score_reasons",
+                "displayName": "score_reasons",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "owner_name",
+                "displayName": "owner_name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "owner_phone",
+                "displayName": "owner_phone",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "owner_email",
+                "displayName": "owner_email",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "mailing_address",
+                "displayName": "mailing_address",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "email_subject",
+                "displayName": "email_subject",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "email_body",
+                "displayName": "email_body",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "outreach_status",
+                "displayName": "outreach_status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              },
+              {
+                "id": "sourced_at",
+                "displayName": "sourced_at",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": false
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "d0676860-3bca-42c9-8b37-80072551dcd3",
+        "name": "Stage Lead in Sheet",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4.7,
+        "position": [
+          1472,
+          16
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "SeWcw5EURnTKVTDR",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "has-email",
+                "leftValue": "={{ $json.owner_email }}",
+                "rightValue": "",
+                "operator": {
+                  "type": "string",
+                  "operation": "notEmpty"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "c87065ce-8af8-4124-82fd-b2817acfae0b",
+        "name": "Has Owner Email?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          1472,
+          208
+        ]
+      },
+      {
+        "parameters": {
+          "sendTo": "={{ $json.owner_email }}",
+          "subject": "={{ $json.email_subject }}",
+          "emailType": "text",
+          "message": "={{ $json.email_body }}",
+          "options": {}
+        },
+        "id": "61ff5a1a-06a6-4f8b-a0e2-eeb676cda393",
+        "name": "Send Outreach Email",
+        "type": "n8n-nodes-base.gmail",
+        "typeVersion": 2.2,
+        "position": [
+          1696,
+          208
+        ],
+        "webhookId": "80fd1b84-4374-4872-9a02-95285144d991",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "4FoHWsDDl4W53rp9",
+            "name": "Gmail account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Every Hour": {
+        "main": [
+          [
+            {
+              "node": "Read Raw Listings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Raw Listings": {
+        "main": [
+          [
+            {
+              "node": "Filter & Score Listings",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Filter & Score Listings": {
+        "main": [
+          [
+            {
+              "node": "Skip-Trace / Enrich Owner",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Skip-Trace / Enrich Owner": {
+        "main": [
+          [
+            {
+              "node": "Generate Outreach Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Generate Outreach Email": {
+        "main": [
+          [
+            {
+              "node": "Assemble Lead Record",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "OpenAI Chat Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Generate Outreach Email",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assemble Lead Record": {
+        "main": [
+          [
+            {
+              "node": "Stage Lead in Sheet",
+              "type": "main",
+              "index": 0
+            },
+            {
+              "node": "Has Owner Email?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Has Owner Email?": {
+        "main": [
+          [
+            {
+              "node": "Send Outreach Email",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [
+      {
+        "id": "0692cc9f-5d94-4f63-8750-ad8a4b3ec921",
+        "name": "Ingest Listings",
+        "nodeIds": [
+          "bc3826a2-2a86-408d-965e-1e5ba8447366"
+        ],
+        "description": "."
+      },
+      {
+        "id": "c3d3c4aa-de1b-4424-95c9-eb094897b648",
+        "name": "Score & Enrich",
+        "nodeIds": [
+          "2e47dd76-fe98-410f-8390-8b93ff83a031",
+          "e25ecfed-d208-4bc3-a234-73e28ba11ace"
+        ],
+        "description": "."
+      },
+      {
+        "id": "d63face1-5b61-44e5-bd1f-23dd3ab3e95d",
+        "name": "Generate & Deliver Outreach",
+        "nodeIds": [
+          "6c44116e-98e2-446c-a701-0aeb05ee457c",
+          "14f18a61-b59d-4233-accf-130a814c994a",
+          "415ad46a-eb7e-474e-b2d6-8a84071a5a2f",
+          "d0676860-3bca-42c9-8b37-80072551dcd3",
+          "c87065ce-8af8-4124-82fd-b2817acfae0b",
+          "61ff5a1a-06a6-4f8b-a0e2-eeb676cda393"
+        ],
+        "description": "."
+      }
+    ],
+    "authors": "Aiza Kashif",
+    "name": "AlphaHunt Engine",
+    "description": "AlphaHunt Engine is an autonomous real-time property sourcing and multi-channel outreach platform designed to eliminate manual lead generation bottlenecks in real estate investment and brokerage operations. Built as an end-to-end automated pipeline, it programmatically ingests raw listing data via structured CSV and API webhook integrations, executes automated data enrichment and skip-tracing to retrieve stakeholder and corporate records, and evaluates potential profit margins through a custom algorithmic scoring matrix. Featuring an integrated Large Language Model (LLM) orchestration layer, the platform dynamically generates hyper personalized cold outreach copy referencing specific asset details and stages qualified leads directly into CRM pipelines slashing manual sourcing time by over 80% and drastically accelerating speed-to-lead conversion",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-09-08T10:38:49.993Z",
+        "id": 1,
+        "workflowId": "PNLJEOsaRHaxFLXo",
+        "versionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+        "event": "activated",
+        "userId": "b4b56e17-bb9f-4605-9b6d-5110b1ca1895"
+      },
+      {
+        "createdAt": "2026-09-08T10:40:56.138Z",
+        "id": 3,
+        "workflowId": "PNLJEOsaRHaxFLXo",
+        "versionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+        "event": "activated",
+        "userId": "b4b56e17-bb9f-4605-9b6d-5110b1ca1895"
+      },
+      {
+        "createdAt": "2026-09-08T10:40:26.733Z",
+        "id": 2,
+        "workflowId": "PNLJEOsaRHaxFLXo",
+        "versionId": "0b102476-22b1-4fbb-8346-a303e861e2c5",
+        "event": "deactivated",
+        "userId": "b4b56e17-bb9f-4605-9b6d-5110b1ca1895"
+      }
+    ]
+  },
+  "homeProject": {
+    "id": "dB5lYe6Hc6gcMXY5",
+    "type": "personal",
+    "name": "Aiza Kashif <2025ai251uetstudent@gmail.com>",
+    "icon": null
+  },
+  "sharedWithProjects": [],
+  "usedCredentials": [
+    {
+      "id": "4FoHWsDDl4W53rp9",
+      "name": "Gmail account",
+      "type": "gmailOAuth2",
+      "currentUserHasAccess": true,
+      "homeProject": {
+        "id": "dB5lYe6Hc6gcMXY5",
+        "type": "personal",
+        "name": "Aiza Kashif <2025ai251uetstudent@gmail.com>",
+        "icon": null
+      },
+      "sharedWithProjects": []
+    },
+    {
+      "id": "SeWcw5EURnTKVTDR",
+      "name": "Google Sheets account",
+      "type": "googleSheetsOAuth2Api",
+      "currentUserHasAccess": true,
+      "homeProject": {
+        "id": "dB5lYe6Hc6gcMXY5",
+        "type": "personal",
+        "name": "Aiza Kashif <2025ai251uetstudent@gmail.com>",
+        "icon": null
+      },
+      "sharedWithProjects": []
+    },
+    {
+      "id": "wF9zGfJqGxXcsuhq",
+      "name": "Simplified Custom Auth account",
+      "type": "httpTemplatedCustomAuth",
+      "currentUserHasAccess": true,
+      "homeProject": {
+        "id": "dB5lYe6Hc6gcMXY5",
+        "type": "personal",
+        "name": "Aiza Kashif <2025ai251uetstudent@gmail.com>",
+        "icon": null
+      },
+      "sharedWithProjects": []
+    }
+  ],
+  "scopes": [
+    "execution:reveal",
+    "workflow:create",
+    "workflow:delete",
+    "workflow:disableRedaction",
+    "workflow:enableRedaction",
+    "workflow:execute",
+    "workflow:execute-chat",
+    "workflow:export",
+    "workflow:import",
+    "workflow:list",
+    "workflow:move",
+    "workflow:publish",
+    "workflow:read",
+    "workflow:share",
+    "workflow:unpublish",
+    "workflow:unshare",
+    "workflow:update"
+  ],
+  "checksum": "eddaf893ae7686509bca983084dc947df4028afda9c3302c83fc4f565ffbd8f7"
+}
